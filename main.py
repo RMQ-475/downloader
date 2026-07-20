@@ -127,3 +127,28 @@ def download(background_tasks: BackgroundTasks, url: str = Form(...)):
         filename=os.path.basename(filename),
         media_type='application/octet-stream'
     )
+    except Exception as e:
+        err_msg = f'<div class="error">Failed to load video: {str(e)[:120]}</div>'
+        return render_html(url=url, error=err_msg)
+
+@app.post("/download")
+def download(background_tasks: BackgroundTasks, url: str = Form(...)):
+    file_id = str(uuid.uuid4())[:8]
+    out_path = f"{DOWNLOAD_DIR}/{file_id}_%(title)s.%(ext)s"
+
+    opts = get_ytdl_opts({
+        'outtmpl': out_path,
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    })
+
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+
+    background_tasks.add_task(cleanup_file, filename)
+
+    return FileResponse(
+        path=filename,
+        filename=os.path.basename(filename),
+        media_type='application/octet-stream'
+    )
