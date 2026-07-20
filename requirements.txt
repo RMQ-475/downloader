@@ -1,4 +1,6 @@
-flet
-flet-permission-handler
+fastapi
+uvicorn
 yt-dlp
 certifi
+python-multipart
+
