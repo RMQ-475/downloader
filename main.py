@@ -1,171 +1,67 @@
-import flet as ft
+from fastapi import FastAPI, Form, BackgroundTasks
+from fastapi.responses import HTMLResponse, FileResponse
 import yt_dlp
 import os
-import random
-import string
+import uuid
 
-def main(page: ft.Page):
-    page.title = "Sleek Downloader"
-    page.theme_mode = ft.ThemeMode.DARK
-    page.dark_theme = ft.Theme(color_scheme_seed=ft.Colors.DEEP_PURPLE)
-    page.vertical_alignment = ft.MainAxisAlignment.CENTER
-    page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
-    page.padding = 30
+app = FastAPI()
+DOWNLOAD_DIR = "/tmp/downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-    current_video_url = [None]
+HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Downloader</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f0f12; color: #fff; text-align: center; padding: 50px 20px; margin: 0; }
+        .card { background: #1a1a24; max-width: 420px; margin: 0 auto; padding: 25px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; color: #a78bfa; }
+        input[type=text] { width: 100%; padding: 14px; margin: 15px 0; border-radius: 10px; border: 1px solid #33334d; background: #0f0f12; color: #fff; font-size: 16px; box-sizing: border-box; }
+        button { width: 100%; padding: 14px; background: #7c4dff; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        button:hover { background: #651fff; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>Downloader</h2>
+        <form action="/download" method="post">
+            <input type="text" name="url" placeholder="Paste link here..." required>
+            <button type="submit">Download File</button>
+        </form>
+    </div>
+</body>
+</html>
+"""
 
-    # 1. Top Input Section
-    url_input = ft.TextField(
-        label="Paste video link here...",
-        border_radius=12,
-        border_color=ft.Colors.DEEP_PURPLE_400,
-        focused_border_color=ft.Colors.DEEP_PURPLE_ACCENT,
-        suffix_icon=ft.Icons.LINK,
-        expand=True,
+def cleanup_file(path: str):
+    if os.path.exists(path):
+        os.remove(path)
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    return HTML
+
+@app.post("/download")
+def download(background_tasks: BackgroundTasks, url: str = Form(...)):
+    file_id = str(uuid.uuid4())[:8]
+    out_path = f"{DOWNLOAD_DIR}/{file_id}_%(title)s.%(ext)s"
+
+    ydl_opts = {
+        'outtmpl': out_path,
+        'format': 'best',
+        'quiet': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+
+    background_tasks.add_task(cleanup_file, filename)
+
+    return FileResponse(
+        path=filename,
+        filename=os.path.basename(filename),
+        media_type='application/octet-stream'
     )
-    
-    fetch_btn = ft.IconButton(
-        icon=ft.Icons.ARROW_FORWARD_ROUNDED,
-        icon_color=ft.Colors.WHITE,
-        bgcolor=ft.Colors.DEEP_PURPLE,
-        icon_size=24,
-        on_click=lambda e: process_link(),
-    )
-
-    # 2. Preview Layout
-    video_title = ft.Text(
-        weight=ft.FontWeight.BOLD, 
-        size=16, 
-        text_align=ft.TextAlign.CENTER,
-        max_lines=2,
-        overflow=ft.TextOverflow.ELLIPSIS
-    )
-    download_btn = ft.ElevatedButton(
-        content=ft.Text("Download Video"),
-        icon=ft.Icons.DOWNLOAD_ROUNDED,
-        bgcolor=ft.Colors.DEEP_PURPLE,
-        color=ft.Colors.WHITE,
-        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=10)),
-        on_click=lambda e: trigger_download(),
-    )
-
-    preview_card = ft.Card(
-        content=ft.Container(
-            content=ft.Column(
-                [
-                    ft.Icon(ft.Icons.VIDEO_LIBRARY, size=50, color=ft.Colors.DEEP_PURPLE_200),
-                    ft.Divider(height=10, color=ft.Colors.SURFACE_CONTAINER_HIGHEST),
-                    video_title,
-                    ft.Container(content=download_btn, margin=ft.Margin.only(top=10)),
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=10,
-            ),
-            padding=20,
-        ),
-        visible=False,
-        width=400,
-    )
-
-    # 3. Status Windows
-    loading_indicator = ft.ProgressRing(visible=False, color=ft.Colors.DEEP_PURPLE_ACCENT)
-    
-    error_banner = ft.Container(
-        content=ft.Row(
-            [
-                ft.Icon(ft.Icons.ERROR_OUTLINE_ROUNDED, color="redaccent400"),
-                ft.Text("Could not find or load video. Check the link, bor.", color="white", weight=ft.FontWeight.W_500)
-            ],
-            alignment=ft.MainAxisAlignment.CENTER
-        ),
-        bgcolor="#2a0808",
-        border=ft.Border.all(1, "red800"),
-        border_radius=10,
-        padding=12,
-        visible=False,
-        width=400,
-    )
-
-    def process_link():
-        if not url_input.value:
-            return
-        
-        error_banner.visible = False
-        preview_card.visible = False
-        loading_indicator.visible = True
-        page.update()
-
-        ydl_opts = {'format': 'best', 'skip_download': True}
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url_input.value, download=False)
-                title = info.get('title', 'Untitled Video')
-                
-                current_video_url[0] = url_input.value
-                video_title.value = title
-                
-                download_btn.content = ft.Text("Download Video")
-                download_btn.disabled = False
-                
-                loading_indicator.visible = False
-                preview_card.visible = True
-        except Exception:
-            loading_indicator.visible = False
-            error_banner.visible = True
-            
-        page.update()
-
-    def trigger_download():
-        download_btn.content = ft.Text("Downloading...")
-        download_btn.disabled = True
-        page.update()
-        
-        rand_suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
-        
-        ydl_opts = {
-            # Moved target path directly to standard /sdcard/Movies/ folder to force Instant Gallery Scan
-            'outtmpl': f'/sdcard/Movies/%(title).100s_{rand_suffix}.%(ext)s',
-            'format': 'best',
-            'restrictfilenames': True,
-            'windowsfilenames': True,
-            'nooverwrites': False, 
-        }
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(current_video_url[0], download=True)
-                filename = ydl.prepare_filename(info)
-            
-            try:
-                os.system(f'termux-media-scan "{filename}" > /dev/null 2>&1 &')
-            except:
-                pass
-                
-            download_btn.content = ft.Text("Saved to Movies! 🚀")
-        except Exception as err:
-            download_btn.content = ft.Text("Download Failed")
-            print(f"Error: {err}")
-            
-        page.update()
-
-    page.add(
-        ft.Container(
-            content=ft.Column(
-                [
-                    ft.Text("Private Grabber", size=28, weight=ft.FontWeight.W_800, color=ft.Colors.DEEP_PURPLE_200),
-                    ft.Row([url_input, fetch_btn], alignment=ft.MainAxisAlignment.CENTER),
-                    loading_indicator,
-                    error_banner,
-                    preview_card,
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=20,
-            ),
-            width=450,
-        )
-    )
-
-if __name__ == "__main__":
-    ft.app(target=main, port=8888, view=ft.AppView.WEB_BROWSER)
-
