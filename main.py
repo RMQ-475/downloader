@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, BackgroundTasks, Request
+from fastapi import FastAPI, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse, FileResponse
 import yt_dlp
 import os
@@ -8,7 +8,7 @@ app = FastAPI()
 DOWNLOAD_DIR = "/tmp/downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-HTML = """
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,17 +33,25 @@ HTML = """
     <div class="card">
         <h2>Downloader</h2>
         <form action="/fetch" method="post">
-            <input type="text" name="url" placeholder="Paste link here..." value="{url_val}" required>
+            <input type="text" name="url" placeholder="Paste link here..." value="URL_VALUE_HOLDER" required>
             <button type="submit">Fetch Video Info</button>
         </form>
 
-        {error_section}
+        ERROR_SECTION_HOLDER
 
-        {preview_section}
+        PREVIEW_SECTION_HOLDER
     </div>
 </body>
 </html>
 """
+
+def render_html(url="", error="", preview=""):
+    return (
+        HTML_TEMPLATE
+        .replace("URL_VALUE_HOLDER", url)
+        .replace("ERROR_SECTION_HOLDER", error)
+        .replace("PREVIEW_SECTION_HOLDER", preview)
+    )
 
 def cleanup_file(path: str):
     if os.path.exists(path):
@@ -56,7 +64,6 @@ def get_ytdl_opts(extra_opts=None):
     opts = {
         'quiet': True,
         'no_warnings': True,
-        # Circumvent YouTube datacenter blocking / 403 errors on cloud hosts
         'extractor_args': {
             'youtube': {
                 'player_client': ['ios', 'android', 'mweb']
@@ -70,7 +77,7 @@ def get_ytdl_opts(extra_opts=None):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return HTML.format(url_val="", error_section="", preview_section="")
+    return render_html()
 
 @app.post("/fetch", response_class=HTMLResponse)
 def fetch_info(url: str = Form(...)):
@@ -82,7 +89,6 @@ def fetch_info(url: str = Form(...)):
             title = info.get('title', 'Video Preview')
             thumbnail = info.get('thumbnail', '')
             
-            # Fallback if no thumbnail is available
             thumb_html = f'<img src="{thumbnail}" alt="Thumbnail">' if thumbnail else '<div style="font-size:48px;margin:10px;">🎥</div>'
 
             preview = f"""
@@ -95,10 +101,10 @@ def fetch_info(url: str = Form(...)):
                 </form>
             </div>
             """
-            return HTML.format(url_val=url, error_section="", preview_section=preview)
+            return render_html(url=url, preview=preview)
     except Exception as e:
         err_msg = f'<div class="error">Failed to load video: {str(e)[:120]}</div>'
-        return HTML.format(url_val=url, error_section=err_msg, preview_section="")
+        return render_html(url=url, error=err_msg)
 
 @app.post("/download")
 def download(background_tasks: BackgroundTasks, url: str = Form(...)):
